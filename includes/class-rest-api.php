@@ -62,6 +62,11 @@ class Interactivity_Gallery_REST_API {
         $per_page = $request->get_param('per_page');
         $page = $request->get_param('page');
         
+        // Log debugging info for REST request
+        if (defined('IG_DEBUG') && IG_DEBUG) {
+            ig_debug_log("REST API request for post ID: $post_id, per_page: $per_page, page: $page");
+        }
+        
         // Get attached media
         $args = array(
             'post_type' => 'attachment',
@@ -69,13 +74,19 @@ class Interactivity_Gallery_REST_API {
             'post_parent' => $post_id,
             'posts_per_page' => $per_page,
             'paged' => $page,
-            'orderby' => 'menu_order',
+            'orderby' => 'menu_order ID',
             'order' => 'ASC',
         );
         
         $query = new WP_Query($args);
         $total_items = $query->found_posts;
         $total_pages = $query->max_num_pages;
+        
+        // Log query results
+        if (defined('IG_DEBUG') && IG_DEBUG) {
+            ig_debug_log("Query found $total_items items and $total_pages pages");
+            ig_debug_log($query->request); // Log the actual SQL query
+        }
         
         $media_items = array();
         
@@ -93,19 +104,47 @@ class Interactivity_Gallery_REST_API {
                 
                 // Get thumbnail
                 $attachment_thumbnail = wp_get_attachment_image_src($attachment_id, 'medium');
+                $thumbnail_url = $attachment_thumbnail ? $attachment_thumbnail[0] : '';
                 
-                $media_items[] = array(
+                // For images, make sure we have a valid thumbnail
+                if (strpos($attachment_type, 'image') !== false && empty($thumbnail_url)) {
+                    // Fallback to full image if thumbnail is missing
+                    $thumbnail_url = $attachment_url;
+                }
+                
+                $media_item = array(
                     'id' => $attachment_id,
                     'url' => $attachment_url,
-                    'thumbnail' => $attachment_thumbnail ? $attachment_thumbnail[0] : '',
+                    'thumbnail' => $thumbnail_url,
                     'title' => $attachment_title,
                     'caption' => $attachment_caption,
                     'alt' => $attachment_alt,
                     'type' => $attachment_type,
                 );
+                
+                // Debug log each item
+                if (defined('IG_DEBUG') && IG_DEBUG) {
+                    ig_debug_log("Media item: " . json_encode($media_item));
+                }
+                
+                $media_items[] = $media_item;
             }
             
             wp_reset_postdata();
+        }
+        
+        // Handle case when no attachments are found
+        if (empty($media_items)) {
+            // Double check with a direct DB query
+            global $wpdb;
+            $count = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(ID) FROM $wpdb->posts WHERE post_parent = %d AND post_type = 'attachment' AND post_status = 'inherit'",
+                $post_id
+            ));
+            
+            if (defined('IG_DEBUG') && IG_DEBUG) {
+                ig_debug_log("Direct DB query found $count attachments");
+            }
         }
         
         $response = array(
@@ -114,6 +153,11 @@ class Interactivity_Gallery_REST_API {
             'total' => $total_items,
             'pages' => $total_pages,
             'current_page' => $page,
+            'debug_info' => defined('IG_DEBUG') && IG_DEBUG ? array(
+                'post_id' => $post_id,
+                'attachment_count' => count($media_items),
+                'query_args' => $args
+            ) : null,
         );
         
         return rest_ensure_response($response);
