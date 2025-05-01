@@ -170,48 +170,46 @@ wp.interactivity.init({
                         state.activeMediaIndex = index;
                         console.log(`[IG] Set activeMediaIndex to ${index}`);
                         
-                        // Add a small delay to ensure the state is updated before showing the lightbox
-                        setTimeout(() => {
-                            state.isLightboxOpen = true;
-                            document.body.style.overflow = 'hidden'; // Prevent body scrolling
+                        // Open the lightbox immediately without setTimeout
+                        state.isLightboxOpen = true;
+                        document.body.style.overflow = 'hidden'; // Prevent body scrolling
+                        
+                        // Use the debug helper after opening
+                        wp.interactivity.context.interactivityGallery.debug.logState(state, 'After Opening Lightbox');
+                        
+                        // Force any inline styles that might help
+                        const lightbox = document.querySelector(selectors.lightbox);
+                        if (lightbox) {
+                            // Directly set important styles to ensure visibility
+                            lightbox.style.cssText = `
+                                position: fixed !important;
+                                top: 0 !important;
+                                left: 0 !important;
+                                right: 0 !important;
+                                bottom: 0 !important;
+                                z-index: 9999 !important;
+                                background-color: rgba(0, 0, 0, 0.9) !important;
+                                display: flex !important;
+                                visibility: visible !important;
+                                opacity: 1 !important;
+                            `;
                             
-                            // Use the debug helper after opening
-                            wp.interactivity.context.interactivityGallery.debug.logState(state, 'After Opening Lightbox');
-                            
-                            // Force any inline styles that might help
-                            const lightbox = document.querySelector(selectors.lightbox);
-                            if (lightbox) {
-                                lightbox.style.display = 'flex';
-                                lightbox.style.position = 'fixed';
-                                lightbox.style.top = '0';
-                                lightbox.style.left = '0';
-                                lightbox.style.right = '0';
-                                lightbox.style.bottom = '0';
-                                lightbox.style.zIndex = '9999';
-                                lightbox.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-                                
-                                // Force the hidden attribute to be removed
-                                lightbox.hidden = false;
-                                lightbox.removeAttribute('hidden');
-                            }
-                            
-                            // Do a direct DOM check
-                            setTimeout(() => {
-                                const lightboxImage = document.querySelector(selectors.lightboxImage);
-                                console.log('[IG] Lightbox element:', {
-                                    lightboxVisible: lightbox ? window.getComputedStyle(lightbox).display !== 'none' : false,
-                                    lightboxImage: lightboxImage,
-                                    imageSrc: lightboxImage ? lightboxImage.getAttribute('src') : 'no image element',
-                                    imageComplete: lightboxImage ? lightboxImage.complete : false
-                                });
-                                
-                                // Directly set the image src as a fallback
-                                if (lightboxImage && (!lightboxImage.src || lightboxImage.src === '')) {
-                                    console.log('[IG] Setting image src directly:', mediaItem.url);
-                                    lightboxImage.src = mediaItem.url;
-                                }
-                            }, 100);
-                        }, 150); // Increased from 100ms to 150ms
+                            // Force the hidden attribute to be removed
+                            lightbox.hidden = false;
+                            lightbox.removeAttribute('hidden');
+                        }
+                        
+                        // Also update the image directly to ensure it's visible
+                        const lightboxImage = document.querySelector(selectors.lightboxImage);
+                        if (lightboxImage && mediaItem.url) {
+                            lightboxImage.src = mediaItem.url;
+                            lightboxImage.style.cssText = `
+                                max-width: 100% !important;
+                                max-height: 100% !important;
+                                object-fit: contain !important;
+                                display: block !important;
+                            `;
+                        }
                     } else {
                         console.log('[IG] Not opening lightbox - not an image or invalid media item');
                     }
@@ -227,6 +225,7 @@ wp.interactivity.init({
                     if (lightbox) {
                         lightbox.hidden = true;
                         lightbox.setAttribute('hidden', '');
+                        lightbox.style.display = 'none';
                     }
                 },
                 
@@ -248,12 +247,10 @@ wp.interactivity.init({
                             state.activeMediaIndex = prevIndex;
                             
                             // Update image directly as a fallback
-                            setTimeout(() => {
-                                const lightboxImage = document.querySelector(selectors.lightboxImage);
-                                if (lightboxImage && state.media[prevIndex] && state.media[prevIndex].url) {
-                                    lightboxImage.src = state.media[prevIndex].url;
-                                }
-                            }, 50);
+                            const lightboxImage = document.querySelector(selectors.lightboxImage);
+                            if (lightboxImage && state.media[prevIndex] && state.media[prevIndex].url) {
+                                lightboxImage.src = state.media[prevIndex].url;
+                            }
                         } else {
                             console.log('[IG] No previous image found');
                         }
@@ -278,12 +275,10 @@ wp.interactivity.init({
                             state.activeMediaIndex = nextIndex;
                             
                             // Update image directly as a fallback
-                            setTimeout(() => {
-                                const lightboxImage = document.querySelector(selectors.lightboxImage);
-                                if (lightboxImage && state.media[nextIndex] && state.media[nextIndex].url) {
-                                    lightboxImage.src = state.media[nextIndex].url;
-                                }
-                            }, 50);
+                            const lightboxImage = document.querySelector(selectors.lightboxImage);
+                            if (lightboxImage && state.media[nextIndex] && state.media[nextIndex].url) {
+                                lightboxImage.src = state.media[nextIndex].url;
+                            }
                         } else {
                             console.log('[IG] No next image found');
                         }

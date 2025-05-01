@@ -251,11 +251,14 @@ class Interactivity_Gallery {
                 'post_id' => get_the_ID(),
                 'per_page' => 12,
                 'columns' => 3,
-                'lightbox' => false, // New parameter to allow opening directly in lightbox
+                'lightbox' => true, // Changed from false to true to enable lightbox by default
             ),
             $atts,
             'interactivity_gallery'
         );
+        
+        // Convert string 'true'/'false' to boolean
+        $atts['lightbox'] = filter_var($atts['lightbox'], FILTER_VALIDATE_BOOLEAN);
         
         // Log shortcode usage
         if (function_exists('ig_debug_log')) {
