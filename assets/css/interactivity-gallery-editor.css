@@ -1,0 +1,21 @@
+/**
+ * Interactivity Gallery Editor Styles
+ */
+ .interactivity-gallery-block-preview {
+    position: relative;
+    min-height: 100px;
+  }
+  
+  .interactivity-gallery-container .interactivity-gallery-loading {
+    min-height: 100px;
+  }
+  
+  .wp-block-interactivity-gallery-gallery {
+    border: 1px solid #e0e0e0;
+    padding: 10px;
+    background-color: #fafafa;
+  }
+  
+  .wp-block-interactivity-gallery-gallery .components-placeholder {
+    min-height: 200px;
+  }
