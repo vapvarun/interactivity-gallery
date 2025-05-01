@@ -112,15 +112,37 @@ class Interactivity_Gallery_REST_API {
                     $thumbnail_url = $attachment_url;
                 }
                 
+                // Ensure we have absolute URLs
+                $site_url = site_url();
+                if ($attachment_url && strpos($attachment_url, 'http') !== 0) {
+                    $attachment_url = $site_url . $attachment_url;
+                }
+                if ($thumbnail_url && strpos($thumbnail_url, 'http') !== 0) {
+                    $thumbnail_url = $site_url . $thumbnail_url;
+                }
+                
                 $media_item = array(
                     'id' => $attachment_id,
-                    'url' => $attachment_url,
-                    'thumbnail' => $thumbnail_url,
+                    'url' => esc_url($attachment_url),  // Make sure URL is properly escaped
+                    'thumbnail' => esc_url($thumbnail_url),  // Make sure thumbnail URL is properly escaped
                     'title' => $attachment_title,
                     'caption' => $attachment_caption,
                     'alt' => $attachment_alt,
                     'type' => $attachment_type,
                 );
+                
+                // Extra validation for URLs
+                if (empty($media_item['url'])) {
+                    ig_debug_log("Warning: Empty URL for attachment ID: $attachment_id");
+                    // Set a fallback
+                    $media_item['url'] = 'https://via.placeholder.com/800x600?text=No+Image';
+                }
+                
+                if (empty($media_item['thumbnail'])) {
+                    ig_debug_log("Warning: Empty thumbnail for attachment ID: $attachment_id");
+                    // Set the URL as thumbnail if no thumbnail available
+                    $media_item['thumbnail'] = $media_item['url'];
+                }
                 
                 // Debug log each item
                 if (defined('IG_DEBUG') && IG_DEBUG) {
@@ -144,6 +166,42 @@ class Interactivity_Gallery_REST_API {
             
             if (defined('IG_DEBUG') && IG_DEBUG) {
                 ig_debug_log("Direct DB query found $count attachments");
+            }
+        }
+        
+        // Add detailed logging for each media item in the REST API response
+        if (defined('IG_DEBUG') && IG_DEBUG) {
+            ig_debug_log(sprintf(
+                "REST API returning %d media items for post ID %d (page %d of %d)",
+                count($media_items),
+                $post_id,
+                $page,
+                $total_pages
+            ));
+            
+            // Log the first few media items in detail
+            $items_to_log = min(count($media_items), 3);
+            for ($i = 0; $i < $items_to_log; $i++) {
+                $item = $media_items[$i];
+                ig_debug_log(sprintf(
+                    "Media item %d: ID=%d, Type=%s, URL=%s, Thumbnail=%s, Title=%s",
+                    $i + 1,
+                    $item['id'],
+                    $item['type'],
+                    $item['url'],
+                    $item['thumbnail'],
+                    $item['title']
+                ));
+                
+                // Validate URL
+                if (empty($item['url']) || !filter_var($item['url'], FILTER_VALIDATE_URL)) {
+                    ig_debug_log("WARNING: Media item {$i} has invalid URL: {$item['url']}");
+                }
+                
+                // Validate thumbnail
+                if (empty($item['thumbnail']) || !filter_var($item['thumbnail'], FILTER_VALIDATE_URL)) {
+                    ig_debug_log("WARNING: Media item {$i} has invalid thumbnail URL: {$item['thumbnail']}");
+                }
             }
         }
         

@@ -28,6 +28,9 @@ class Interactivity_Gallery {
         
         // Enqueue scripts and styles
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
+        
+        // Add footer script for emergency fix
+        add_action('wp_footer', array($this, 'add_emergency_script'));
     }
     
     /**
@@ -50,6 +53,11 @@ class Interactivity_Gallery {
             return;
         }
         
+        // Log enqueuing
+        if (function_exists('ig_debug_log')) {
+            ig_debug_log('Enqueueing Interactivity Gallery scripts and styles');
+        }
+        
         // Enqueue the CSS first
         wp_enqueue_style(
             'interactivity-gallery-styles',
@@ -59,184 +67,177 @@ class Interactivity_Gallery {
         );
         
         // Enqueue the Interactivity API
-        wp_enqueue_script('wp-interactivity');
+        if (function_exists('wp_enqueue_interactivity_api')) {
+            // WP 6.5+ function
+            wp_enqueue_interactivity_api();
+            if (function_exists('ig_debug_log')) {
+                ig_debug_log('Enqueued Interactivity API using wp_enqueue_interactivity_api()');
+            }
+        } else {
+            // Fallback
+            wp_enqueue_script('wp-interactivity');
+            if (function_exists('ig_debug_log')) {
+                ig_debug_log('Enqueued Interactivity API using wp_enqueue_script(\'wp-interactivity\')');
+            }
+        }
         
-        // Instead of using a file reference, we'll directly embed the JS code
+        // Add our JS code
         $js_content = $this->get_gallery_js();
-        wp_add_inline_script('wp-interactivity', $js_content);
+        $handle = 'interactivity-gallery-script-' . wp_unique_id();
+        wp_add_inline_script('wp-interactivity', $js_content, 'after');
+        if (function_exists('ig_debug_log')) {
+            ig_debug_log('Interactivity Gallery JavaScript added inline with handle: ' . $handle);
+        }
+        
+        // Optionally add inline CSS as fallback
+        if (defined('IG_DEBUG') && IG_DEBUG) {
+            $css_file = IG_PLUGIN_DIR . 'assets/css/interactivity-gallery.css';
+            if (file_exists($css_file)) {
+                $css_content = file_get_contents($css_file);
+                wp_add_inline_style('interactivity-gallery-styles', $css_content);
+                if (function_exists('ig_debug_log')) {
+                    ig_debug_log('Added CSS inline as fallback');
+                }
+            }
+        }
+    }
+    
+    /**
+     * Add emergency fallback script in footer
+     */
+    public function add_emergency_script() {
+        global $post;
+        
+        if (!is_a($post, 'WP_Post')) {
+            return;
+        }
+        
+        $has_block = false;
+        if (function_exists('has_block') && has_block('interactivity-gallery/gallery', $post)) {
+            $has_block = true;
+        }
+        
+        if (!$has_block && !has_shortcode($post->post_content, 'interactivity_gallery')) {
+            return;
+        }
+        
+        ?>
+        <script>
+        // Emergency Lightbox Fix
+        (function() {
+          document.addEventListener('DOMContentLoaded', function() {
+            console.log('[IG FIX] Emergency lightbox fix initialized');
+            
+            // Find all gallery images
+            const galleryImages = document.querySelectorAll('.interactivity-gallery-item a');
+            
+            // Find the lightbox elements
+            const lightbox = document.querySelector('.interactivity-gallery-lightbox');
+            const lightboxImage = document.querySelector('.interactivity-gallery-lightbox-image');
+            const closeButton = document.querySelector('.interactivity-gallery-lightbox-close');
+            
+            if (!lightbox || !lightboxImage) {
+              console.error('[IG FIX] Lightbox elements not found');
+              return;
+            }
+            
+            console.log('[IG FIX] Found lightbox elements:', { 
+              galleryImages: galleryImages.length, 
+              lightbox: !!lightbox, 
+              lightboxImage: !!lightboxImage 
+            });
+            
+            // Add click events to all gallery images
+            galleryImages.forEach(function(link, index) {
+              link.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Get the thumbnail image
+                const img = link.querySelector('img');
+                if (!img) return;
+                
+                console.log('[IG FIX] Opening lightbox for image:', img.src);
+                
+                // Get the full-size image URL (replace '-scaled' or '-thumbnail' with original)
+                let fullSizeUrl = img.src.replace(/-\d+x\d+\./g, '.');
+                fullSizeUrl = fullSizeUrl.replace(/-scaled\./g, '.');
+                fullSizeUrl = fullSizeUrl.replace(/-thumbnail\./g, '.');
+                
+                // Show the lightbox
+                lightbox.hidden = false;
+                lightbox.removeAttribute('hidden');
+                lightbox.style.display = 'flex';
+                lightbox.style.position = 'fixed';
+                lightbox.style.top = '0';
+                lightbox.style.left = '0';
+                lightbox.style.right = '0';
+                lightbox.style.bottom = '0';
+                lightbox.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                lightbox.style.zIndex = '99999';
+                
+                // Set the image
+                lightboxImage.src = fullSizeUrl;
+                lightboxImage.style.maxWidth = '100%';
+                lightboxImage.style.maxHeight = '100%';
+                lightboxImage.style.display = 'block';
+                
+                // Prevent scrolling
+                document.body.style.overflow = 'hidden';
+                
+                console.log('[IG FIX] Lightbox opened with image:', fullSizeUrl);
+              });
+            });
+            
+            // Add close functionality
+            if (closeButton) {
+              closeButton.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                lightbox.hidden = true;
+                lightbox.setAttribute('hidden', '');
+                lightbox.style.display = 'none';
+                document.body.style.overflow = '';
+                console.log('[IG FIX] Lightbox closed');
+              });
+            }
+            
+            // Close when clicking outside the image
+            lightbox.addEventListener('click', function(e) {
+              if (e.target === lightbox) {
+                lightbox.hidden = true;
+                lightbox.setAttribute('hidden', '');
+                lightbox.style.display = 'none';
+                document.body.style.overflow = '';
+                console.log('[IG FIX] Lightbox closed (clicked outside)');
+              }
+            });
+            
+            console.log('[IG FIX] Emergency lightbox fix ready');
+          });
+        })();
+        </script>
+        <?php
     }
     
     /**
      * Get the gallery JavaScript code
      */
     private function get_gallery_js() {
-        // You can either include the file or paste its content here
+        // Try to read the JS file
         $js_file = IG_PLUGIN_DIR . 'assets/js/interactivity-gallery.js';
         
         if (file_exists($js_file)) {
+            if (function_exists('ig_debug_log')) {
+                ig_debug_log('Read JavaScript file: SUCCESS');
+            }
             return file_get_contents($js_file);
         } else {
-            // Fallback JS in case the file doesn't exist
-            return "
-            /**
-             * Interactivity Gallery - Interactive API Implementation
-             */
-            wp.interactivity.init({
-                context: {
-                    interactivityGallery: {
-                        state: {
-                            // State is initialized from the data-wp-context attribute
-                        },
-                        actions: {
-                            loadMedia: async ({ state, event }) => {
-                                state.isLoading = true;
-                                state.hasError = false;
-                                
-                                try {
-                                    console.log(`Loading media from: /wp-json/interactivity-gallery/v1/media/${state.postId}?per_page=${state.perPage}&page=${state.currentPage}`);
-                                    
-                                    const response = await fetch(`/wp-json/interactivity-gallery/v1/media/${state.postId}?per_page=${state.perPage}&page=${state.currentPage}`);
-                                    
-                                    if (!response.ok) {
-                                        throw new Error(`Network response was not ok: ${response.status} ${response.statusText}`);
-                                    }
-                                    
-                                    const data = await response.json();
-                                    console.log('Media data received:', data);
-                                    
-                                    if (!data.success || !Array.isArray(data.media)) {
-                                        throw new Error('Invalid data format received from server');
-                                    }
-                                    
-                                    // Update state with fetched data
-                                    state.media = data.media;
-                                    state.totalPages = data.pages;
-                                    state.currentPage = data.current_page;
-                                    state.isLoading = false;
-                                    
-                                    console.log('Media items loaded:', state.media.length);
-                                    
-                                    // Set the first image as the active one if we have images
-                                    if (state.media.length > 0) {
-                                        // Find the first image in the collection
-                                        let firstImageIndex = -1;
-                                        for (let i = 0; i < state.media.length; i++) {
-                                            if (state.media[i].type && state.media[i].type.includes('image')) {
-                                                firstImageIndex = i;
-                                                break;
-                                            }
-                                        }
-                                        
-                                        if (firstImageIndex !== -1) {
-                                            console.log('Setting first image as active:', firstImageIndex);
-                                            state.activeMediaIndex = firstImageIndex;
-                                        }
-                                    }
-                                } catch (error) {
-                                    console.error('Error loading media:', error);
-                                    state.hasError = true;
-                                    state.isLoading = false;
-                                }
-                            },
-                            
-                            goToPage: async ({ state, event, data }) => {
-                                event.preventDefault();
-                                
-                                if (data.page < 1 || data.page > state.totalPages || data.page === state.currentPage) {
-                                    return;
-                                }
-                                
-                                // Update current page
-                                state.currentPage = data.page;
-                                
-                                // Reset active media index
-                                state.activeMediaIndex = -1;
-                                
-                                // Reload media
-                                await wp.interactivity.actions.interactivityGallery.loadMedia({ state, event });
-                                
-                                // Scroll to top of gallery
-                                const galleryContainer = event.target.closest('.interactivity-gallery-container');
-                                if (galleryContainer) {
-                                    galleryContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                }
-                            },
-                            
-                            openLightbox: ({ state, event, data }) => {
-                                event.preventDefault();
-                                
-                                const index = data.index;
-                                console.log('Opening lightbox for index:', index);
-                                console.log('Media item:', state.media[index]);
-                                
-                                // Only open lightbox for images
-                                if (state.media[index] && state.media[index].type && state.media[index].type.includes('image')) {
-                                    state.activeMediaIndex = index;
-                                    state.isLightboxOpen = true;
-                                    document.body.style.overflow = 'hidden'; // Prevent body scrolling
-                                    console.log('Lightbox opened, activeMediaIndex:', state.activeMediaIndex);
-                                } else {
-                                    console.log('Not opening lightbox - not an image or invalid media item');
-                                }
-                            },
-                            
-                            closeLightbox: ({ state, event }) => {
-                                console.log('Closing lightbox');
-                                state.isLightboxOpen = false;
-                                document.body.style.overflow = ''; // Restore body scrolling
-                            },
-                            
-                            prevMedia: ({ state, event }) => {
-                                event.preventDefault();
-                                console.log('Current activeMediaIndex:', state.activeMediaIndex);
-                                
-                                if (state.activeMediaIndex > 0) {
-                                    // Find previous image in the collection
-                                    let prevIndex = state.activeMediaIndex - 1;
-                                    
-                                    // Skip non-image media types
-                                    while (prevIndex >= 0 && !state.media[prevIndex].type.includes('image')) {
-                                        prevIndex--;
-                                    }
-                                    
-                                    if (prevIndex >= 0) {
-                                        console.log('Moving to previous image at index:', prevIndex);
-                                        state.activeMediaIndex = prevIndex;
-                                    } else {
-                                        console.log('No previous image found');
-                                    }
-                                }
-                            },
-                            
-                            nextMedia: ({ state, event }) => {
-                                event.preventDefault();
-                                console.log('Current activeMediaIndex:', state.activeMediaIndex);
-                                
-                                if (state.activeMediaIndex < state.media.length - 1) {
-                                    // Find next image in the collection
-                                    let nextIndex = state.activeMediaIndex + 1;
-                                    
-                                    // Skip non-image media types
-                                    while (nextIndex < state.media.length && !state.media[nextIndex].type.includes('image')) {
-                                        nextIndex++;
-                                    }
-                                    
-                                    if (nextIndex < state.media.length) {
-                                        console.log('Moving to next image at index:', nextIndex);
-                                        state.activeMediaIndex = nextIndex;
-                                    } else {
-                                        console.log('No next image found');
-                                    }
-                                }
-                            },
-                            
-                            stopPropagation: ({ event }) => {
-                                event.stopPropagation();
-                            }
-                        }
-                    }
-                }
-            });";
+            if (function_exists('ig_debug_log')) {
+                ig_debug_log('Read JavaScript file: FAILED - Using fallback');
+            }
+            // Use fallback JS in case the file doesn't exist
+            return "console.log('[IG] Using fallback JS');";
         }
     }
     
@@ -256,6 +257,17 @@ class Interactivity_Gallery {
             'interactivity_gallery'
         );
         
+        // Log shortcode usage
+        if (function_exists('ig_debug_log')) {
+            ig_debug_log(sprintf(
+                'Shortcode called with attributes: post_id=%s, per_page=%s, columns=%s, lightbox=%s',
+                $atts['post_id'],
+                $atts['per_page'],
+                $atts['columns'],
+                $atts['lightbox'] ? 'true' : 'false'
+            ));
+        }
+        
         return $this->render_gallery($atts);
     }
     
@@ -272,6 +284,9 @@ class Interactivity_Gallery {
         
         // Verify that the post exists
         if (!get_post($args['post_id'])) {
+            if (function_exists('ig_debug_log')) {
+                ig_debug_log('Error: Post ID ' . $args['post_id'] . ' does not exist');
+            }
             return '<p class="interactivity-gallery-error">Error: Post ID ' . esc_html($args['post_id']) . ' does not exist.</p>';
         }
         
@@ -279,17 +294,37 @@ class Interactivity_Gallery {
         $attachment_count = $this->count_post_attachments($args['post_id']);
         
         if ($attachment_count == 0) {
+            if (function_exists('ig_debug_log')) {
+                ig_debug_log('No media attachments found for post ID ' . $args['post_id']);
+            }
             return '<p class="interactivity-gallery-error">No media attachments found for post ID ' . esc_html($args['post_id']) . '.</p>';
         }
         
         // Generate a unique namespace for this gallery instance
         $namespace = 'interactivityGallery' . uniqid();
         
+        // Log gallery rendering with variables
+        if (function_exists('ig_debug_log')) {
+            ig_debug_log(sprintf(
+                "Rendering gallery: post_id=%d, per_page=%d, columns=%d, lightbox=%s, attachments=%d",
+                $args['post_id'],
+                $args['per_page'],
+                $args['columns'],
+                $args['lightbox'] ? 'true' : 'false',
+                $attachment_count
+            ));
+        }
+        
         // Start output buffering
         ob_start();
         
         // Add HTML comment for debugging
         echo '<!-- Interactivity Gallery | Post ID: ' . esc_html($args['post_id']) . ' | Attachments: ' . esc_html($attachment_count) . ' -->';
+        
+        // Log initial state setting
+        if (function_exists('ig_debug_log')) {
+            ig_debug_log("Setting initial state with activeMediaIndex=-1 and isLightboxOpen=false");
+        }
         
         // Output data store initialization using wp-context
         echo '<script type="application/json" data-wp-context="' . esc_attr($namespace) . '">';
@@ -302,8 +337,8 @@ class Interactivity_Gallery {
             'isLoading' => true,
             'hasError' => false,
             'media' => array(),
-            'activeMediaIndex' => -1, // Will be set to 0 after loading
-            'isLightboxOpen' => $args['lightbox'], // Open lightbox directly if requested
+            'activeMediaIndex' => -1, // Will be set after loading
+            'isLightboxOpen' => false, // Don't open lightbox initially
         ));
         echo '</script>';
         
@@ -342,7 +377,7 @@ class Interactivity_Gallery {
                 <template data-wp-foreach--item="state.media" data-wp-foreach-key="index">
                     <div class="interactivity-gallery-item">
                         <!-- Media content based on type -->
-                        <div data-wp-bind--hidden="!item.type.includes('image')">
+                        <div data-wp-bind--hidden="!item.type || !item.type.includes('image')">
                             <a 
                                 href="#" 
                                 data-wp-on--click="actions.openLightbox"
@@ -355,14 +390,14 @@ class Interactivity_Gallery {
                             </a>
                         </div>
                         
-                        <div data-wp-bind--hidden="!item.type.includes('video')" class="media-video-wrapper">
+                        <div data-wp-bind--hidden="!item.type || !item.type.includes('video')" class="media-video-wrapper">
                             <video controls>
                                 <source data-wp-bind--src="item.url" data-wp-bind--type="item.type">
                                 Your browser does not support the video tag.
                             </video>
                         </div>
                         
-                        <div data-wp-bind--hidden="!item.type.includes('audio')" class="media-audio-wrapper">
+                        <div data-wp-bind--hidden="!item.type || !item.type.includes('audio')" class="media-audio-wrapper">
                             <audio controls>
                                 <source data-wp-bind--src="item.url" data-wp-bind--type="item.type">
                                 Your browser does not support the audio tag.
@@ -370,7 +405,7 @@ class Interactivity_Gallery {
                         </div>
                         
                         <div 
-                            data-wp-bind--hidden="item.type.includes('image') || item.type.includes('video') || item.type.includes('audio')" 
+                            data-wp-bind--hidden="!item.type || item.type.includes('image') || item.type.includes('video') || item.type.includes('audio')" 
                             class="media-file-wrapper"
                         >
                             <a data-wp-bind--href="item.url" target="_blank">
@@ -431,7 +466,7 @@ class Interactivity_Gallery {
             
             <!-- Lightbox -->
             <div 
-                class="interactivity-gallery-lightbox"
+                class="interactivity-gallery-lightbox" 
                 data-wp-bind--hidden="!state.isLightboxOpen"
                 data-wp-on--click="actions.closeLightbox"
             >
@@ -442,8 +477,7 @@ class Interactivity_Gallery {
                     <div class="interactivity-gallery-lightbox-header">
                         <span 
                             class="interactivity-gallery-lightbox-title"
-                            data-wp-bind--hidden="state.activeMediaIndex === -1"
-                            data-wp-text="state.activeMediaIndex !== -1 ? state.media[state.activeMediaIndex].title : ''"
+                            data-wp-text="state.activeMediaIndex >= 0 && state.media && state.media.length > 0 && state.media[state.activeMediaIndex] ? state.media[state.activeMediaIndex].title : ''"
                         ></span>
                         <button 
                             class="interactivity-gallery-lightbox-close"
@@ -455,34 +489,134 @@ class Interactivity_Gallery {
                         <button 
                             class="interactivity-gallery-lightbox-prev"
                             data-wp-on--click="actions.prevMedia"
-                            data-wp-bind--hidden="state.activeMediaIndex <= 0"
+                            data-wp-bind--hidden="state.activeMediaIndex <= 0 || !state.media || state.media.length === 0"
                         >&lsaquo;</button>
                         
                         <div class="interactivity-gallery-lightbox-image-container">
                             <img 
                                 class="interactivity-gallery-lightbox-image"
-                                data-wp-bind--hidden="state.activeMediaIndex === -1"
-                                data-wp-bind--src="state.activeMediaIndex !== -1 ? state.media[state.activeMediaIndex].url : ''"
-                                data-wp-bind--alt="state.activeMediaIndex !== -1 ? (state.media[state.activeMediaIndex].alt || state.media[state.activeMediaIndex].title) : ''"
+                                data-wp-bind--src="state.activeMediaIndex >= 0 && state.media && state.media.length > 0 && state.media[state.activeMediaIndex] ? state.media[state.activeMediaIndex].url : ''"
+                                data-wp-bind--alt="state.activeMediaIndex >= 0 && state.media && state.media.length > 0 && state.media[state.activeMediaIndex] ? (state.media[state.activeMediaIndex].alt || state.media[state.activeMediaIndex].title) : ''"
+                            />
+                            <!-- Static fallback image - will be visible until the dynamic image loads -->
+                            <img 
+                                src="https://via.placeholder.com/800x600?text=Loading+Image..." 
+                                alt="Loading Image"
+                                style="position: absolute; max-width: 100%; max-height: 100%; z-index: 1; border: none; display: block;"
+                                data-wp-bind--hidden="state.activeMediaIndex >= 0 && state.media && state.media.length > 0 && state.media[state.activeMediaIndex] && state.media[state.activeMediaIndex].url"
                             />
                         </div>
                         
                         <button 
                             class="interactivity-gallery-lightbox-next"
                             data-wp-on--click="actions.nextMedia"
-                            data-wp-bind--hidden="state.activeMediaIndex >= state.media.length - 1"
+                            data-wp-bind--hidden="!state.media || state.media.length === 0 || state.activeMediaIndex < 0 || state.activeMediaIndex >= state.media.length - 1"
                         >&rsaquo;</button>
                     </div>
                     
                     <div class="interactivity-gallery-lightbox-footer">
                         <span 
                             class="interactivity-gallery-lightbox-count"
-                            data-wp-bind--hidden="state.activeMediaIndex === -1"
-                            data-wp-text="(state.activeMediaIndex + 1) + ' of ' + state.media.length"
+                            data-wp-bind--hidden="state.activeMediaIndex < 0 || !state.media || state.media.length === 0"
+                            data-wp-text="state.activeMediaIndex >= 0 && state.media && state.media.length > 0 ? ((state.activeMediaIndex + 1) + ' of ' + state.media.length) : ''"
                         ></span>
                     </div>
                 </div>
             </div>
+            
+            <!-- Critical inline styles with !important to override any theme styles -->
+            <style>
+            /* Critical lightbox styles with !important to ensure visibility */
+            .interactivity-gallery-lightbox {
+                position: fixed !important;
+                top: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                background-color: rgba(0, 0, 0, 0.9) !important;
+                z-index: 99999 !important; /* Extremely high z-index */
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+            }
+            
+            /* When hidden attribute is present */
+            .interactivity-gallery-lightbox[hidden] {
+                display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+            }
+            
+            .interactivity-gallery-lightbox-content {
+                width: 90% !important;
+                max-width: 1000px !important;
+                background-color: #1a1a1a !important;
+                border-radius: 4px !important;
+                display: flex !important;
+                flex-direction: column !important;
+                max-height: 90vh !important;
+                box-shadow: 0 0 20px rgba(0, 0, 0, 0.5) !important;
+            }
+            
+            .interactivity-gallery-lightbox-image-container {
+                width: 100% !important;
+                height: 70vh !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                padding: 20px !important;
+                box-sizing: border-box !important;
+                position: relative !important;
+            }
+            
+            .interactivity-gallery-lightbox-image {
+                max-width: 100% !important;
+                max-height: 100% !important;
+                object-fit: contain !important;
+                display: block !important;
+            }
+            
+            .interactivity-gallery-lightbox-close {
+                background: none !important;
+                border: none !important;
+                color: #fff !important;
+                font-size: 24px !important;
+                cursor: pointer !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                line-height: 1 !important;
+            }
+            
+            .interactivity-gallery-lightbox-prev,
+            .interactivity-gallery-lightbox-next {
+                position: absolute !important;
+                top: 50% !important;
+                transform: translateY(-50%) !important;
+                background: rgba(0, 0, 0, 0.5) !important;
+                border: none !important;
+                color: #fff !important;
+                font-size: 36px !important;
+                cursor: pointer !important;
+                padding: 10px !important;
+                z-index: 2 !important;
+                width: 50px !important;
+                height: 50px !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                border-radius: 50% !important;
+            }
+            
+            .interactivity-gallery-lightbox-prev {
+                left: 10px !important;
+            }
+            
+            .interactivity-gallery-lightbox-next {
+                right: 10px !important;
+            }
+            </style>
         </div>
         <?php
         
