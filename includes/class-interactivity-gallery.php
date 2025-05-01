@@ -61,14 +61,17 @@ class Interactivity_Gallery {
             IG_PLUGIN_VERSION
         );
         
-        // Enqueue JavaScript
-        wp_enqueue_script(
+        // Enqueue JavaScript - FIXED
+        wp_register_script(
             'interactivity-gallery-script',
             IG_PLUGIN_URL . 'assets/js/interactivity-gallery.js',
             array('wp-interactivity'),
             IG_PLUGIN_VERSION,
             true
         );
+        
+        // Make sure the script is properly registered before enqueueing
+        wp_enqueue_script('interactivity-gallery-script');
     }
     
     /**
