@@ -128,93 +128,100 @@ class Interactivity_Gallery {
           document.addEventListener('DOMContentLoaded', function() {
             console.log('[IG FIX] Emergency lightbox fix initialized');
             
+            // Observe DOM for lightbox visibility changes
+            observeLightboxChanges();
+            
+            // Add backup click handlers to gallery images
+            addBackupClickHandlers();
+          });
+          
+          function observeLightboxChanges() {
+            // Create a mutation observer to detect when the lightbox becomes visible
+            const observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(mutation) {
+                    if (mutation.attributeName === 'hidden' || 
+                        mutation.attributeName === 'style' ||
+                        mutation.attributeName === 'class') {
+                        
+                        const lightbox = document.querySelector('.interactivity-gallery-lightbox');
+                        if (lightbox && !lightbox.hidden && 
+                            !lightbox.hasAttribute('hidden') &&
+                            (window.getComputedStyle(lightbox).display !== 'none')) {
+                            
+                            console.log('[IG FIX] Lightbox visible - ensuring proper display');
+                            ensureLightboxIsVisible();
+                        }
+                    }
+                });
+            });
+            
+            // Start observing the lightbox element
+            const lightbox = document.querySelector('.interactivity-gallery-lightbox');
+            if (lightbox) {
+                observer.observe(lightbox, { 
+                    attributes: true, 
+                    attributeFilter: ['hidden', 'style', 'class'] 
+                });
+                console.log('[IG FIX] Observing lightbox for changes');
+            }
+          }
+          
+          function addBackupClickHandlers() {
             // Find all gallery images
             const galleryImages = document.querySelectorAll('.interactivity-gallery-item a');
             
             // Find the lightbox elements
             const lightbox = document.querySelector('.interactivity-gallery-lightbox');
             const lightboxImage = document.querySelector('.interactivity-gallery-lightbox-image');
-            const closeButton = document.querySelector('.interactivity-gallery-lightbox-close');
             
             if (!lightbox || !lightboxImage) {
               console.error('[IG FIX] Lightbox elements not found');
               return;
             }
             
-            console.log('[IG FIX] Found lightbox elements:', { 
-              galleryImages: galleryImages.length, 
-              lightbox: !!lightbox, 
-              lightboxImage: !!lightboxImage 
-            });
-            
             // Add click events to all gallery images
             galleryImages.forEach(function(link, index) {
               link.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                // Get the thumbnail image
-                const img = link.querySelector('img');
-                if (!img) return;
-                
-                console.log('[IG FIX] Opening lightbox for image:', img.src);
-                
-                // Get the full-size image URL (replace '-scaled' or '-thumbnail' with original)
-                let fullSizeUrl = img.src.replace(/-\d+x\d+\./g, '.');
-                fullSizeUrl = fullSizeUrl.replace(/-scaled\./g, '.');
-                fullSizeUrl = fullSizeUrl.replace(/-thumbnail\./g, '.');
-                
-                // Show the lightbox
-                lightbox.hidden = false;
-                lightbox.removeAttribute('hidden');
-                lightbox.style.display = 'flex';
-                lightbox.style.position = 'fixed';
-                lightbox.style.top = '0';
-                lightbox.style.left = '0';
-                lightbox.style.right = '0';
-                lightbox.style.bottom = '0';
-                lightbox.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-                lightbox.style.zIndex = '99999';
-                
-                // Set the image
-                lightboxImage.src = fullSizeUrl;
-                lightboxImage.style.maxWidth = '100%';
-                lightboxImage.style.maxHeight = '100%';
-                lightboxImage.style.display = 'block';
-                
-                // Prevent scrolling
-                document.body.style.overflow = 'hidden';
-                
-                console.log('[IG FIX] Lightbox opened with image:', fullSizeUrl);
+                // Don't override default behavior, just add a backup
+                setTimeout(() => {
+                  // If lightbox is hidden but should be visible, fix it
+                  if (lightbox && !lightbox.hidden && 
+                      !lightbox.hasAttribute('hidden') &&
+                      window.getComputedStyle(lightbox).display === 'none') {
+                      
+                      console.log('[IG FIX] Backup handler fixing lightbox display');
+                      ensureLightboxIsVisible();
+                  }
+                }, 100);
               });
             });
+          }
+          
+          function ensureLightboxIsVisible() {
+            const lightbox = document.querySelector('.interactivity-gallery-lightbox');
             
-            // Add close functionality
-            if (closeButton) {
-              closeButton.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                lightbox.hidden = true;
-                lightbox.setAttribute('hidden', '');
-                lightbox.style.display = 'none';
-                document.body.style.overflow = '';
-                console.log('[IG FIX] Lightbox closed');
-              });
-            }
+            if (!lightbox) return;
             
-            // Close when clicking outside the image
-            lightbox.addEventListener('click', function(e) {
-              if (e.target === lightbox) {
-                lightbox.hidden = true;
-                lightbox.setAttribute('hidden', '');
-                lightbox.style.display = 'none';
-                document.body.style.overflow = '';
-                console.log('[IG FIX] Lightbox closed (clicked outside)');
-              }
-            });
+            // Force the lightbox to be visible
+            lightbox.style.cssText = `
+                position: fixed !important;
+                top: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                background-color: rgba(0, 0, 0, 0.9) !important;
+                z-index: 9999999 !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+            `;
             
-            console.log('[IG FIX] Emergency lightbox fix ready');
-          });
+            // Remove hidden attributes
+            lightbox.hidden = false;
+            lightbox.removeAttribute('hidden');
+          }
         })();
         </script>
         <?php
@@ -326,7 +333,7 @@ class Interactivity_Gallery {
         
         // Log initial state setting
         if (function_exists('ig_debug_log')) {
-            ig_debug_log("Setting initial state with activeMediaIndex=-1 and isLightboxOpen=false");
+            ig_debug_log("Setting initial state with currentImageIndex=-1 and isLightboxOpen=false");
         }
         
         // Output data store initialization using wp-context
@@ -340,7 +347,10 @@ class Interactivity_Gallery {
             'isLoading' => true,
             'hasError' => false,
             'media' => array(),
-            'activeMediaIndex' => -1, // Will be set after loading
+            // New data structures for improved lightbox functionality
+            'mediaMap' => (object)array(), // Empty object for JSON
+            'lightboxItems' => array(),
+            'currentImageIndex' => -1, // Index in the lightboxItems array
             'isLightboxOpen' => false, // Don't open lightbox initially
         ));
         echo '</script>';
@@ -467,7 +477,7 @@ class Interactivity_Gallery {
                 >&raquo;</a>
             </div>
             
-            <!-- Lightbox -->
+            <!-- Improved Lightbox Implementation -->
             <div 
                 class="interactivity-gallery-lightbox" 
                 data-wp-bind--hidden="!state.isLightboxOpen"
@@ -480,7 +490,7 @@ class Interactivity_Gallery {
                     <div class="interactivity-gallery-lightbox-header">
                         <span 
                             class="interactivity-gallery-lightbox-title"
-                            data-wp-text="state.activeMediaIndex >= 0 && state.media && state.media.length > 0 && state.media[state.activeMediaIndex] ? state.media[state.activeMediaIndex].title : ''"
+                            data-wp-text="state.currentImageIndex >= 0 && state.lightboxItems.length > 0 ? state.lightboxItems[state.currentImageIndex].title : ''"
                         ></span>
                         <button 
                             class="interactivity-gallery-lightbox-close"
@@ -491,37 +501,30 @@ class Interactivity_Gallery {
                     <div class="interactivity-gallery-lightbox-body">
                         <button 
                             class="interactivity-gallery-lightbox-prev"
-                            data-wp-on--click="actions.prevMedia"
-                            data-wp-bind--hidden="state.activeMediaIndex <= 0 || !state.media || state.media.length === 0"
+                            data-wp-on--click="actions.prevImage"
+                            data-wp-bind--hidden="state.currentImageIndex <= 0"
                         >&lsaquo;</button>
                         
                         <div class="interactivity-gallery-lightbox-image-container">
                             <img 
                                 class="interactivity-gallery-lightbox-image"
-                                data-wp-bind--src="state.activeMediaIndex >= 0 && state.media && state.media.length > 0 && state.media[state.activeMediaIndex] ? state.media[state.activeMediaIndex].url : ''"
-                                data-wp-bind--alt="state.activeMediaIndex >= 0 && state.media && state.media.length > 0 && state.media[state.activeMediaIndex] ? (state.media[state.activeMediaIndex].alt || state.media[state.activeMediaIndex].title) : ''"
-                            />
-                            <!-- Static fallback image - will be visible until the dynamic image loads -->
-                            <img 
-                                src="https://via.placeholder.com/800x600?text=Loading+Image..." 
-                                alt="Loading Image"
-                                style="position: absolute; max-width: 100%; max-height: 100%; z-index: 1; border: none; display: block;"
-                                data-wp-bind--hidden="state.activeMediaIndex >= 0 && state.media && state.media.length > 0 && state.media[state.activeMediaIndex] && state.media[state.activeMediaIndex].url"
+                                data-wp-bind--src="state.currentImageIndex >= 0 && state.lightboxItems.length > 0 ? state.lightboxItems[state.currentImageIndex].url : ''"
+                                data-wp-bind--alt="state.currentImageIndex >= 0 && state.lightboxItems.length > 0 ? state.lightboxItems[state.currentImageIndex].alt : ''"
                             />
                         </div>
                         
                         <button 
                             class="interactivity-gallery-lightbox-next"
-                            data-wp-on--click="actions.nextMedia"
-                            data-wp-bind--hidden="!state.media || state.media.length === 0 || state.activeMediaIndex < 0 || state.activeMediaIndex >= state.media.length - 1"
+                            data-wp-on--click="actions.nextImage"
+                            data-wp-bind--hidden="state.currentImageIndex < 0 || state.currentImageIndex >= state.lightboxItems.length - 1"
                         >&rsaquo;</button>
                     </div>
                     
                     <div class="interactivity-gallery-lightbox-footer">
                         <span 
                             class="interactivity-gallery-lightbox-count"
-                            data-wp-bind--hidden="state.activeMediaIndex < 0 || !state.media || state.media.length === 0"
-                            data-wp-text="state.activeMediaIndex >= 0 && state.media && state.media.length > 0 ? ((state.activeMediaIndex + 1) + ' of ' + state.media.length) : ''"
+                            data-wp-bind--hidden="state.currentImageIndex < 0 || state.lightboxItems.length === 0"
+                            data-wp-text="state.currentImageIndex >= 0 && state.lightboxItems.length > 0 ? ((state.currentImageIndex + 1) + ' of ' + state.lightboxItems.length) : ''"
                         ></span>
                     </div>
                 </div>

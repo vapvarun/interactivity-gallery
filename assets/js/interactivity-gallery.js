@@ -1,5 +1,6 @@
 /**
  * Interactivity Gallery - Interactive API Implementation for WordPress 6.8+
+ * Improved with robust state management and storage approach
  */
 console.log('[IG DEBUG] Interactivity Gallery Script Loaded');
 
@@ -22,20 +23,21 @@ wp.interactivity.init({
                         // Log key state variables
                         console.log('State:', {
                             mediaCount: state.media ? state.media.length : 0,
-                            activeMediaIndex: state.activeMediaIndex,
+                            imageCount: state.lightboxItems ? state.lightboxItems.length : 0,
+                            currentImageIndex: state.currentImageIndex,
                             isLightboxOpen: state.isLightboxOpen,
                             currentPage: state.currentPage,
                             totalPages: state.totalPages
                         });
                         
-                        // Check active media item
-                        if (state.activeMediaIndex >= 0 && state.media && state.media.length > 0) {
-                            const activeItem = state.media[state.activeMediaIndex];
-                            console.log('Active Media:', {
+                        // Check active image
+                        if (state.currentImageIndex >= 0 && state.lightboxItems && state.lightboxItems.length > 0) {
+                            const activeItem = state.lightboxItems[state.currentImageIndex];
+                            console.log('Active Image:', {
                                 title: activeItem.title,
-                                type: activeItem.type,
                                 url: activeItem.url,
-                                thumbnail: activeItem.thumbnail
+                                thumbnail: activeItem.thumbnail,
+                                originalIndex: activeItem.originalIndex
                             });
                             
                             // Try to validate the image URL
@@ -53,6 +55,15 @@ wp.interactivity.init({
             },
             state: {
                 // State is initialized from the data-wp-context attribute
+                // The following properties will be added dynamically:
+                // postId, perPage, columns, currentPage, totalPages
+                // isLoading, hasError, media
+
+                // New state properties for improved lightbox functionality:
+                mediaMap: {}, // For quick lookup by ID
+                lightboxItems: [], // Array of only image items, pre-processed for lightbox
+                currentImageIndex: -1, // Index in the lightboxItems array (not the media array)
+                isLightboxOpen: false
             },
             actions: {
                 loadMedia: async ({ state, event, selectors }) => {
@@ -82,31 +93,51 @@ wp.interactivity.init({
                             throw new Error('Invalid data format received from server');
                         }
                         
-                        // Update state with fetched data
+                        // Store the raw media data
                         state.media = data.media;
+                        
+                        // Build improved data structures for efficient access
+                        state.mediaMap = {};
+                        state.lightboxItems = [];
+                        
+                        // Process media items to build lookups and filter for lightbox
+                        state.media.forEach((item, index) => {
+                            // Store in map for quick lookups
+                            state.mediaMap[item.id] = item;
+                            
+                            // For image items only, prepare for lightbox
+                            if (item.type && item.type.includes('image')) {
+                                state.lightboxItems.push({
+                                    originalIndex: index, // Store original position in media array
+                                    id: item.id,
+                                    url: item.url,
+                                    thumbnail: item.thumbnail,
+                                    title: item.title,
+                                    alt: item.alt || item.title
+                                });
+                            }
+                        });
+                        
+                        // Update pagination data
                         state.totalPages = data.pages;
                         state.currentPage = data.current_page;
                         state.isLoading = false;
                         
-                        console.log(`[IG] Media loaded: ${state.media.length} items`);
+                        console.log(`[IG] Media loaded: ${state.media.length} total items, ${state.lightboxItems.length} images`);
+                        
+                        // Set default current image if we have images, but don't open lightbox
+                        if (state.lightboxItems.length > 0) {
+                            state.currentImageIndex = 0;
+                            console.log(`[IG] Set initial currentImageIndex to 0`);
+                        } else {
+                            state.currentImageIndex = -1;
+                        }
                         
                         // Log the first few media items if available
-                        if (state.media.length > 0) {
-                            console.log('[IG] First 2 media items:', state.media.slice(0, 2));
-                            
-                            // Find the first image in the collection
-                            let firstImageIndex = -1;
-                            for (let i = 0; i < state.media.length; i++) {
-                                if (state.media[i].type && state.media[i].type.includes('image')) {
-                                    firstImageIndex = i;
-                                    break;
-                                }
-                            }
-                            
-                            if (firstImageIndex !== -1) {
-                                console.log(`[IG] Setting first image as active: index=${firstImageIndex}`);
-                                state.activeMediaIndex = firstImageIndex;
-                            }
+                        if (state.lightboxItems.length > 0) {
+                            console.log('[IG] First 2 lightbox items:', 
+                                state.lightboxItems.slice(0, Math.min(2, state.lightboxItems.length))
+                            );
                         }
                     } catch (error) {
                         console.error('[IG] Error loading media:', error);
@@ -127,8 +158,12 @@ wp.interactivity.init({
                     // Update current page
                     state.currentPage = data.page;
                     
-                    // Reset active media index
-                    state.activeMediaIndex = -1;
+                    // Reset current image index and close lightbox if open
+                    state.currentImageIndex = -1;
+                    if (state.isLightboxOpen) {
+                        state.isLightboxOpen = false;
+                        document.body.style.overflow = '';
+                    }
                     
                     // Reload media
                     await wp.interactivity.actions.interactivityGallery.loadMedia({ state, event });
@@ -143,75 +178,68 @@ wp.interactivity.init({
                 openLightbox: ({ state, event, data, selectors }) => {
                     event.preventDefault();
                     
-                    const index = parseInt(data.index);
-                    console.log(`[IG] Opening lightbox for index: ${index}`);
+                    const originalIndex = parseInt(data.index);
+                    console.log(`[IG] Opening lightbox for media index: ${originalIndex}`);
                     
                     // Use the debug helper
                     wp.interactivity.context.interactivityGallery.debug.logState(state, 'Before Opening Lightbox');
                     
-                    // Validate index
-                    if (isNaN(index) || index < 0 || !state.media || index >= state.media.length) {
-                        console.error(`[IG] Invalid media index: ${index}`);
+                    // Find the corresponding lightbox item by original index
+                    const lightboxItemIndex = state.lightboxItems.findIndex(
+                        item => item.originalIndex === originalIndex
+                    );
+                    
+                    if (lightboxItemIndex === -1) {
+                        console.error(`[IG] No image found at index ${originalIndex} or item is not an image`);
                         return;
                     }
                     
-                    const mediaItem = state.media[index];
-                    console.log('[IG] Media item:', mediaItem);
+                    const lightboxItem = state.lightboxItems[lightboxItemIndex];
+                    console.log('[IG] Found lightbox item:', lightboxItem);
                     
-                    // Only open lightbox for images
-                    if (mediaItem && mediaItem.type && mediaItem.type.includes('image')) {
-                        // Validate image URL
-                        if (!mediaItem.url) {
-                            console.error('[IG] Media item has no URL:', mediaItem);
-                            return;
-                        }
+                    // Set the current image index and open the lightbox
+                    state.currentImageIndex = lightboxItemIndex;
+                    console.log(`[IG] Set currentImageIndex to ${lightboxItemIndex}`);
+                    
+                    // Open the lightbox
+                    state.isLightboxOpen = true;
+                    document.body.style.overflow = 'hidden'; // Prevent body scrolling
+                    
+                    // Use the debug helper after opening
+                    wp.interactivity.context.interactivityGallery.debug.logState(state, 'After Opening Lightbox');
+                    
+                    // Force any inline styles that might help
+                    const lightbox = document.querySelector(selectors.lightbox);
+                    if (lightbox) {
+                        // Directly set important styles to ensure visibility
+                        lightbox.style.cssText = `
+                            position: fixed !important;
+                            top: 0 !important;
+                            left: 0 !important;
+                            right: 0 !important;
+                            bottom: 0 !important;
+                            z-index: 9999 !important;
+                            background-color: rgba(0, 0, 0, 0.9) !important;
+                            display: flex !important;
+                            visibility: visible !important;
+                            opacity: 1 !important;
+                        `;
                         
-                        // Set active index before opening lightbox to ensure proper rendering
-                        state.activeMediaIndex = index;
-                        console.log(`[IG] Set activeMediaIndex to ${index}`);
-                        
-                        // Open the lightbox immediately without setTimeout
-                        state.isLightboxOpen = true;
-                        document.body.style.overflow = 'hidden'; // Prevent body scrolling
-                        
-                        // Use the debug helper after opening
-                        wp.interactivity.context.interactivityGallery.debug.logState(state, 'After Opening Lightbox');
-                        
-                        // Force any inline styles that might help
-                        const lightbox = document.querySelector(selectors.lightbox);
-                        if (lightbox) {
-                            // Directly set important styles to ensure visibility
-                            lightbox.style.cssText = `
-                                position: fixed !important;
-                                top: 0 !important;
-                                left: 0 !important;
-                                right: 0 !important;
-                                bottom: 0 !important;
-                                z-index: 9999 !important;
-                                background-color: rgba(0, 0, 0, 0.9) !important;
-                                display: flex !important;
-                                visibility: visible !important;
-                                opacity: 1 !important;
-                            `;
-                            
-                            // Force the hidden attribute to be removed
-                            lightbox.hidden = false;
-                            lightbox.removeAttribute('hidden');
-                        }
-                        
-                        // Also update the image directly to ensure it's visible
-                        const lightboxImage = document.querySelector(selectors.lightboxImage);
-                        if (lightboxImage && mediaItem.url) {
-                            lightboxImage.src = mediaItem.url;
-                            lightboxImage.style.cssText = `
-                                max-width: 100% !important;
-                                max-height: 100% !important;
-                                object-fit: contain !important;
-                                display: block !important;
-                            `;
-                        }
-                    } else {
-                        console.log('[IG] Not opening lightbox - not an image or invalid media item');
+                        // Force the hidden attribute to be removed
+                        lightbox.hidden = false;
+                        lightbox.removeAttribute('hidden');
+                    }
+                    
+                    // Also update the image directly to ensure it's visible
+                    const lightboxImage = document.querySelector(selectors.lightboxImage);
+                    if (lightboxImage && lightboxItem.url) {
+                        lightboxImage.src = lightboxItem.url;
+                        lightboxImage.style.cssText = `
+                            max-width: 100% !important;
+                            max-height: 100% !important;
+                            object-fit: contain !important;
+                            display: block !important;
+                        `;
                     }
                 },
                 
@@ -229,59 +257,41 @@ wp.interactivity.init({
                     }
                 },
                 
-                prevMedia: ({ state, event, selectors }) => {
+                prevImage: ({ state, event, selectors }) => {
                     event.preventDefault();
-                    console.log(`[IG] prevMedia called, current index: ${state.activeMediaIndex}`);
+                    console.log(`[IG] prevImage called, current index: ${state.currentImageIndex}`);
                     
-                    if (state.activeMediaIndex > 0) {
-                        // Find previous image in the collection
-                        let prevIndex = state.activeMediaIndex - 1;
+                    if (state.currentImageIndex > 0) {
+                        // Simply decrement the index since we're working with pre-filtered images
+                        state.currentImageIndex--;
+                        console.log(`[IG] Moving to previous image at index: ${state.currentImageIndex}`);
                         
-                        // Skip non-image media types
-                        while (prevIndex >= 0 && !state.media[prevIndex].type.includes('image')) {
-                            prevIndex--;
+                        // Update image directly as a fallback
+                        const lightboxImage = document.querySelector(selectors.lightboxImage);
+                        if (lightboxImage && state.lightboxItems[state.currentImageIndex]) {
+                            lightboxImage.src = state.lightboxItems[state.currentImageIndex].url;
                         }
-                        
-                        if (prevIndex >= 0) {
-                            console.log(`[IG] Moving to previous image at index: ${prevIndex}`);
-                            state.activeMediaIndex = prevIndex;
-                            
-                            // Update image directly as a fallback
-                            const lightboxImage = document.querySelector(selectors.lightboxImage);
-                            if (lightboxImage && state.media[prevIndex] && state.media[prevIndex].url) {
-                                lightboxImage.src = state.media[prevIndex].url;
-                            }
-                        } else {
-                            console.log('[IG] No previous image found');
-                        }
+                    } else {
+                        console.log('[IG] Already at first image');
                     }
                 },
                 
-                nextMedia: ({ state, event, selectors }) => {
+                nextImage: ({ state, event, selectors }) => {
                     event.preventDefault();
-                    console.log(`[IG] nextMedia called, current index: ${state.activeMediaIndex}`);
+                    console.log(`[IG] nextImage called, current index: ${state.currentImageIndex}`);
                     
-                    if (state.activeMediaIndex < state.media.length - 1) {
-                        // Find next image in the collection
-                        let nextIndex = state.activeMediaIndex + 1;
+                    if (state.currentImageIndex < state.lightboxItems.length - 1) {
+                        // Simply increment the index since we're working with pre-filtered images
+                        state.currentImageIndex++;
+                        console.log(`[IG] Moving to next image at index: ${state.currentImageIndex}`);
                         
-                        // Skip non-image media types
-                        while (nextIndex < state.media.length && !state.media[nextIndex].type.includes('image')) {
-                            nextIndex++;
+                        // Update image directly as a fallback
+                        const lightboxImage = document.querySelector(selectors.lightboxImage);
+                        if (lightboxImage && state.lightboxItems[state.currentImageIndex]) {
+                            lightboxImage.src = state.lightboxItems[state.currentImageIndex].url;
                         }
-                        
-                        if (nextIndex < state.media.length) {
-                            console.log(`[IG] Moving to next image at index: ${nextIndex}`);
-                            state.activeMediaIndex = nextIndex;
-                            
-                            // Update image directly as a fallback
-                            const lightboxImage = document.querySelector(selectors.lightboxImage);
-                            if (lightboxImage && state.media[nextIndex] && state.media[nextIndex].url) {
-                                lightboxImage.src = state.media[nextIndex].url;
-                            }
-                        } else {
-                            console.log('[IG] No next image found');
-                        }
+                    } else {
+                        console.log('[IG] Already at last image');
                     }
                 },
                 
