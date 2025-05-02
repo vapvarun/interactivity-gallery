@@ -31,6 +31,20 @@ class Interactivity_Gallery {
         
         // Add footer script for emergency fix
         add_action('wp_footer', array($this, 'add_emergency_script'));
+        
+        // Add support for cache prevention in lightbox images
+        add_filter('wp_get_attachment_image_src', array($this, 'add_cache_prevention_to_images'), 10, 4);
+    }
+    
+    /**
+     * Add cache prevention to images
+     */
+    public function add_cache_prevention_to_images($image, $attachment_id, $size, $icon) {
+        if (is_array($image) && !empty($image[0])) {
+            // Add a timestamp to prevent caching
+            $image[0] = add_query_arg('_nocache', time(), $image[0]);
+        }
+        return $image;
     }
     
     /**
@@ -53,52 +67,38 @@ class Interactivity_Gallery {
             return;
         }
         
-        // Log enqueuing
-        if (function_exists('ig_debug_log')) {
-            ig_debug_log('Enqueueing Interactivity Gallery scripts and styles');
-        }
-        
         // Enqueue the CSS first
         wp_enqueue_style(
             'interactivity-gallery-styles',
             IG_PLUGIN_URL . 'assets/css/interactivity-gallery.css',
             array(),
-            IG_PLUGIN_VERSION
+            IG_PLUGIN_VERSION . '.' . time() // Add time to version to prevent caching
         );
         
         // Enqueue the Interactivity API
         if (function_exists('wp_enqueue_interactivity_api')) {
             // WP 6.5+ function
             wp_enqueue_interactivity_api();
-            if (function_exists('ig_debug_log')) {
-                ig_debug_log('Enqueued Interactivity API using wp_enqueue_interactivity_api()');
-            }
         } else {
             // Fallback
             wp_enqueue_script('wp-interactivity');
-            if (function_exists('ig_debug_log')) {
-                ig_debug_log('Enqueued Interactivity API using wp_enqueue_script(\'wp-interactivity\')');
-            }
         }
         
         // Add our JS code
         $js_content = $this->get_gallery_js();
         $handle = 'interactivity-gallery-script-' . wp_unique_id();
         wp_add_inline_script('wp-interactivity', $js_content, 'after');
-        if (function_exists('ig_debug_log')) {
-            ig_debug_log('Interactivity Gallery JavaScript added inline with handle: ' . $handle);
-        }
         
-        // Optionally add inline CSS as fallback
-        if (defined('IG_DEBUG') && IG_DEBUG) {
-            $css_file = IG_PLUGIN_DIR . 'assets/css/interactivity-gallery.css';
-            if (file_exists($css_file)) {
-                $css_content = file_get_contents($css_file);
-                wp_add_inline_style('interactivity-gallery-styles', $css_content);
-                if (function_exists('ig_debug_log')) {
-                    ig_debug_log('Added CSS inline as fallback');
-                }
-            }
+        // Additionally, add the lightbox fix script
+        $lightbox_fix_file = IG_PLUGIN_DIR . 'assets/js/lightbox-fix.js';
+        if (file_exists($lightbox_fix_file)) {
+            wp_enqueue_script(
+                'interactivity-gallery-lightbox-fix',
+                IG_PLUGIN_URL . 'assets/js/lightbox-fix.js',
+                array('wp-interactivity'),
+                IG_PLUGIN_VERSION . '.' . time(),
+                true
+            );
         }
     }
     
@@ -121,110 +121,73 @@ class Interactivity_Gallery {
             return;
         }
         
-        ?>
-        <script>
-        // Emergency Lightbox Fix
-        (function() {
-          document.addEventListener('DOMContentLoaded', function() {
-            console.log('[IG FIX] Emergency lightbox fix initialized');
-            
-            // Observe DOM for lightbox visibility changes
-            observeLightboxChanges();
-            
-            // Add backup click handlers to gallery images
-            addBackupClickHandlers();
-          });
-          
-          function observeLightboxChanges() {
-            // Create a mutation observer to detect when the lightbox becomes visible
-            const observer = new MutationObserver(function(mutations) {
-                mutations.forEach(function(mutation) {
-                    if (mutation.attributeName === 'hidden' || 
-                        mutation.attributeName === 'style' ||
-                        mutation.attributeName === 'class') {
+        // Only add the inline script if the separate file wasn't loaded
+        $lightbox_fix_file = IG_PLUGIN_DIR . 'assets/js/lightbox-fix.js';
+        if (!file_exists($lightbox_fix_file)) {
+            ?>
+            <script>
+            // Emergency Lightbox Fix
+            (function() {
+                document.addEventListener('DOMContentLoaded', function() {
+                    // Find all galleries
+                    document.querySelectorAll('.interactivity-gallery-container').forEach(function(gallery) {
+                        const namespace = gallery.getAttribute('data-wp-interactive');
+                        if (!namespace) return;
                         
-                        const lightbox = document.querySelector('.interactivity-gallery-lightbox');
-                        if (lightbox && !lightbox.hidden && 
-                            !lightbox.hasAttribute('hidden') &&
-                            (window.getComputedStyle(lightbox).display !== 'none')) {
-                            
-                            console.log('[IG FIX] Lightbox visible - ensuring proper display');
-                            ensureLightboxIsVisible();
-                        }
-                    }
+                        const lightbox = gallery.querySelector('.interactivity-gallery-lightbox');
+                        const lightboxImage = gallery.querySelector('.interactivity-gallery-lightbox-image');
+                        if (!lightbox || !lightboxImage) return;
+                        
+                        // Make sure lightbox is visible when it should be
+                        setInterval(function() {
+                            if (wp.interactivity && wp.interactivity.state && 
+                                wp.interactivity.state[namespace] && 
+                                wp.interactivity.state[namespace].isLightboxOpen) {
+                                
+                                if (lightbox.hidden || lightbox.hasAttribute('hidden') || 
+                                    window.getComputedStyle(lightbox).display === 'none') {
+                                    
+                                    lightbox.hidden = false;
+                                    lightbox.removeAttribute('hidden');
+                                    lightbox.style.cssText = `
+                                        position: fixed !important;
+                                        top: 0 !important;
+                                        left: 0 !important;
+                                        right: 0 !important;
+                                        bottom: 0 !important;
+                                        background-color: rgba(0, 0, 0, 0.9) !important;
+                                        z-index: 9999999 !important;
+                                        display: flex !important;
+                                        align-items: center !important;
+                                        justify-content: center !important;
+                                        visibility: visible !important;
+                                        opacity: 1 !important;
+                                    `;
+                                }
+                            }
+                        }, 500);
+                        
+                        // Add click handlers
+                        gallery.querySelectorAll('.interactivity-gallery-item a').forEach(function(link) {
+                            link.addEventListener('click', function() {
+                                setTimeout(function() {
+                                    if (wp.interactivity && wp.interactivity.state && 
+                                        wp.interactivity.state[namespace] && 
+                                        wp.interactivity.state[namespace].isLightboxOpen) {
+                                        
+                                        lightbox.hidden = false;
+                                        lightbox.removeAttribute('hidden');
+                                        lightbox.style.display = 'flex';
+                                    }
+                                }, 50);
+                            });
+                        });
+                    });
                 });
-            });
-            
-            // Start observing the lightbox element
-            const lightbox = document.querySelector('.interactivity-gallery-lightbox');
-            if (lightbox) {
-                observer.observe(lightbox, { 
-                    attributes: true, 
-                    attributeFilter: ['hidden', 'style', 'class'] 
-                });
-                console.log('[IG FIX] Observing lightbox for changes');
-            }
-          }
-          
-          function addBackupClickHandlers() {
-            // Find all gallery images
-            const galleryImages = document.querySelectorAll('.interactivity-gallery-item a');
-            
-            // Find the lightbox elements
-            const lightbox = document.querySelector('.interactivity-gallery-lightbox');
-            const lightboxImage = document.querySelector('.interactivity-gallery-lightbox-image');
-            
-            if (!lightbox || !lightboxImage) {
-              console.error('[IG FIX] Lightbox elements not found');
-              return;
-            }
-            
-            // Add click events to all gallery images
-            galleryImages.forEach(function(link, index) {
-              link.addEventListener('click', function(e) {
-                // Don't override default behavior, just add a backup
-                setTimeout(() => {
-                  // If lightbox is hidden but should be visible, fix it
-                  if (lightbox && !lightbox.hidden && 
-                      !lightbox.hasAttribute('hidden') &&
-                      window.getComputedStyle(lightbox).display === 'none') {
-                      
-                      console.log('[IG FIX] Backup handler fixing lightbox display');
-                      ensureLightboxIsVisible();
-                  }
-                }, 100);
-              });
-            });
-          }
-          
-          function ensureLightboxIsVisible() {
-            const lightbox = document.querySelector('.interactivity-gallery-lightbox');
-            
-            if (!lightbox) return;
-            
-            // Force the lightbox to be visible
-            lightbox.style.cssText = `
-                position: fixed !important;
-                top: 0 !important;
-                left: 0 !important;
-                right: 0 !important;
-                bottom: 0 !important;
-                background-color: rgba(0, 0, 0, 0.9) !important;
-                z-index: 9999999 !important;
-                display: flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-                visibility: visible !important;
-                opacity: 1 !important;
-            `;
-            
-            // Remove hidden attributes
-            lightbox.hidden = false;
-            lightbox.removeAttribute('hidden');
-          }
-        })();
-        </script>
-        <?php
+            })();
+            </script>
+            <?php
+        }
     }
     
     /**
@@ -235,14 +198,8 @@ class Interactivity_Gallery {
         $js_file = IG_PLUGIN_DIR . 'assets/js/interactivity-gallery.js';
         
         if (file_exists($js_file)) {
-            if (function_exists('ig_debug_log')) {
-                ig_debug_log('Read JavaScript file: SUCCESS');
-            }
             return file_get_contents($js_file);
         } else {
-            if (function_exists('ig_debug_log')) {
-                ig_debug_log('Read JavaScript file: FAILED - Using fallback');
-            }
             // Use fallback JS in case the file doesn't exist
             return "console.log('[IG] Using fallback JS');";
         }
@@ -258,7 +215,7 @@ class Interactivity_Gallery {
                 'post_id' => get_the_ID(),
                 'per_page' => 12,
                 'columns' => 3,
-                'lightbox' => true, // Changed from false to true to enable lightbox by default
+                'lightbox' => true,
             ),
             $atts,
             'interactivity_gallery'
@@ -266,17 +223,6 @@ class Interactivity_Gallery {
         
         // Convert string 'true'/'false' to boolean
         $atts['lightbox'] = filter_var($atts['lightbox'], FILTER_VALIDATE_BOOLEAN);
-        
-        // Log shortcode usage
-        if (function_exists('ig_debug_log')) {
-            ig_debug_log(sprintf(
-                'Shortcode called with attributes: post_id=%s, per_page=%s, columns=%s, lightbox=%s',
-                $atts['post_id'],
-                $atts['per_page'],
-                $atts['columns'],
-                $atts['lightbox'] ? 'true' : 'false'
-            ));
-        }
         
         return $this->render_gallery($atts);
     }
@@ -294,9 +240,6 @@ class Interactivity_Gallery {
         
         // Verify that the post exists
         if (!get_post($args['post_id'])) {
-            if (function_exists('ig_debug_log')) {
-                ig_debug_log('Error: Post ID ' . $args['post_id'] . ' does not exist');
-            }
             return '<p class="interactivity-gallery-error">Error: Post ID ' . esc_html($args['post_id']) . ' does not exist.</p>';
         }
         
@@ -304,37 +247,17 @@ class Interactivity_Gallery {
         $attachment_count = $this->count_post_attachments($args['post_id']);
         
         if ($attachment_count == 0) {
-            if (function_exists('ig_debug_log')) {
-                ig_debug_log('No media attachments found for post ID ' . $args['post_id']);
-            }
             return '<p class="interactivity-gallery-error">No media attachments found for post ID ' . esc_html($args['post_id']) . '.</p>';
         }
         
         // Generate a unique namespace for this gallery instance
         $namespace = 'interactivityGallery' . uniqid();
         
-        // Log gallery rendering with variables
-        if (function_exists('ig_debug_log')) {
-            ig_debug_log(sprintf(
-                "Rendering gallery: post_id=%d, per_page=%d, columns=%d, lightbox=%s, attachments=%d",
-                $args['post_id'],
-                $args['per_page'],
-                $args['columns'],
-                $args['lightbox'] ? 'true' : 'false',
-                $attachment_count
-            ));
-        }
-        
         // Start output buffering
         ob_start();
         
         // Add HTML comment for debugging
         echo '<!-- Interactivity Gallery | Post ID: ' . esc_html($args['post_id']) . ' | Attachments: ' . esc_html($attachment_count) . ' -->';
-        
-        // Log initial state setting
-        if (function_exists('ig_debug_log')) {
-            ig_debug_log("Setting initial state with currentImageIndex=-1 and isLightboxOpen=false");
-        }
         
         // Output data store initialization using wp-context
         echo '<script type="application/json" data-wp-context="' . esc_attr($namespace) . '">';
@@ -506,6 +429,7 @@ class Interactivity_Gallery {
                         >&lsaquo;</button>
                         
                         <div class="interactivity-gallery-lightbox-image-container">
+                            <!-- The lightbox image -->
                             <img 
                                 class="interactivity-gallery-lightbox-image"
                                 data-wp-bind--src="state.currentImageIndex >= 0 && state.lightboxItems.length > 0 ? state.lightboxItems[state.currentImageIndex].url : ''"

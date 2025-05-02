@@ -1,74 +1,246 @@
 /**
- * Interactivity Gallery Lightbox Fix - Simplified
- * This script provides a fallback for lightbox display issues
+ * Interactivity Gallery Lightbox Fix
  */
 (function() {
     document.addEventListener('DOMContentLoaded', function() {
-        console.log('[IG LIGHTBOX FIX] Script loaded - simplified version');
+        // Find all galleries on the page
+        const galleries = document.querySelectorAll('.interactivity-gallery-container');
         
-        // Observe DOM for lightbox visibility changes
-        observeLightboxChanges();
+        if (galleries.length === 0) {
+            return;
+        }
         
-        // Add backup click handlers to gallery images
-        addBackupClickHandlers();
+        // Process each gallery separately
+        galleries.forEach(function(gallery) {
+            // Get the namespace for this gallery
+            const namespace = gallery.getAttribute('data-wp-interactive');
+            
+            if (!namespace) {
+                return;
+            }
+            
+            // Find the lightbox for this gallery
+            const lightbox = gallery.querySelector('.interactivity-gallery-lightbox');
+            const lightboxImage = gallery.querySelector('.interactivity-gallery-lightbox-image');
+            
+            if (!lightbox || !lightboxImage) {
+                return;
+            }
+            
+            // Observe the lightbox for visibility changes
+            observeLightboxChanges(lightbox, lightboxImage, namespace);
+            
+            // Add enhanced click handlers to gallery images
+            addEnhancedClickHandlers(gallery, lightbox, lightboxImage, namespace);
+            
+            // Add navigation event listeners
+            addNavigationHandlers(gallery, lightboxImage, namespace);
+        });
     });
     
-    function observeLightboxChanges() {
-        // Create a mutation observer to detect when the lightbox becomes visible
+    // Function to observe lightbox visibility changes
+    function observeLightboxChanges(lightbox, lightboxImage, namespace) {
+        // Create a mutation observer to detect attribute changes
         const observer = new MutationObserver(function(mutations) {
             mutations.forEach(function(mutation) {
                 if (mutation.attributeName === 'hidden' || 
                     mutation.attributeName === 'style' ||
                     mutation.attributeName === 'class') {
                     
-                    const lightbox = document.querySelector('.interactivity-gallery-lightbox');
-                    if (lightbox && !lightbox.hidden && 
-                        !lightbox.hasAttribute('hidden') &&
-                        (window.getComputedStyle(lightbox).display !== 'none')) {
+                    // Check if the lightbox should be visible but isn't
+                    if (wp.interactivity && 
+                        wp.interactivity.state && 
+                        wp.interactivity.state[namespace] &&
+                        wp.interactivity.state[namespace].isLightboxOpen) {
                         
-                        console.log('[IG LIGHTBOX FIX] Lightbox visible - ensuring proper display');
-                        ensureLightboxIsVisible();
+                        if (lightbox.hidden || 
+                            lightbox.hasAttribute('hidden') ||
+                            window.getComputedStyle(lightbox).display === 'none' ||
+                            window.getComputedStyle(lightbox).visibility === 'hidden') {
+                            
+                            fixLightboxVisibility(lightbox, lightboxImage, namespace);
+                        }
                     }
                 }
             });
         });
         
-        // Start observing the lightbox element
-        const lightbox = document.querySelector('.interactivity-gallery-lightbox');
-        if (lightbox) {
-            observer.observe(lightbox, { 
-                attributes: true, 
-                attributeFilter: ['hidden', 'style', 'class'] 
-            });
-            console.log('[IG LIGHTBOX FIX] Observing lightbox for changes');
-        }
+        // Start observing the lightbox
+        observer.observe(lightbox, { 
+            attributes: true, 
+            attributeFilter: ['hidden', 'style', 'class'] 
+        });
+        
+        // Also poll for state changes
+        const stateInterval = setInterval(function() {
+            if (wp.interactivity && 
+                wp.interactivity.state && 
+                wp.interactivity.state[namespace]) {
+                
+                const state = wp.interactivity.state[namespace];
+                
+                // If lightbox should be open
+                if (state.isLightboxOpen) {
+                    // Check if lightbox is properly visible
+                    if (lightbox.hidden || 
+                        lightbox.hasAttribute('hidden') ||
+                        window.getComputedStyle(lightbox).display === 'none' ||
+                        window.getComputedStyle(lightbox).visibility === 'hidden') {
+                        
+                        fixLightboxVisibility(lightbox, lightboxImage, namespace);
+                    }
+                    
+                    // Check if image is correct
+                    if (state.currentImageIndex >= 0 && 
+                        state.lightboxItems && 
+                        state.lightboxItems.length > 0 &&
+                        state.currentImageIndex < state.lightboxItems.length) {
+                        
+                        const expectedUrl = state.lightboxItems[state.currentImageIndex].url;
+                        
+                        // If image source is empty or wrong
+                        if (!lightboxImage.src || !lightboxImage.src.includes(expectedUrl.split('?')[0])) {
+                            
+                            // Add timestamp to force reload
+                            const timestamp = new Date().getTime();
+                            const imageUrl = expectedUrl.includes('?') 
+                                ? `${expectedUrl}&_t=${timestamp}` 
+                                : `${expectedUrl}?_t=${timestamp}`;
+                            
+                            lightboxImage.src = imageUrl;
+                        }
+                    }
+                }
+            }
+        }, 500); // Check every 500ms
+        
+        // Clean up interval when page unloads
+        window.addEventListener('beforeunload', function() {
+            clearInterval(stateInterval);
+        });
     }
     
-    function addBackupClickHandlers() {
-        // This is just a fallback in case the Interactivity API events fail
-        document.querySelectorAll('.interactivity-gallery-item a').forEach(link => {
-            link.addEventListener('click', function(e) {
-                // Only add as backup - don't prevent default behavior
-                setTimeout(() => {
-                    const lightbox = document.querySelector('.interactivity-gallery-lightbox');
-                    if (lightbox && !lightbox.hidden && 
-                        !lightbox.hasAttribute('hidden') &&
-                        window.getComputedStyle(lightbox).display === 'none') {
-                        
-                        console.log('[IG LIGHTBOX FIX] Backup handler fixing lightbox display');
-                        ensureLightboxIsVisible();
+    // Function to add enhanced click handlers to gallery images
+    function addEnhancedClickHandlers(gallery, lightbox, lightboxImage, namespace) {
+        // Find all images in this gallery
+        const galleryLinks = gallery.querySelectorAll('.interactivity-gallery-item a');
+        
+        galleryLinks.forEach(function(link) {
+            link.addEventListener('click', function() {
+                // Let the original handler run, then check after a delay
+                setTimeout(function() {
+                    // Only proceed if interactivity API is available
+                    if (!wp.interactivity || !wp.interactivity.state || !wp.interactivity.state[namespace]) {
+                        return;
                     }
-                }, 100);
+                    
+                    const state = wp.interactivity.state[namespace];
+                    
+                    // If lightbox should be open
+                    if (state.isLightboxOpen) {
+                        // Fix lightbox visibility if needed
+                        if (lightbox.hidden || 
+                            lightbox.hasAttribute('hidden') ||
+                            window.getComputedStyle(lightbox).display === 'none' ||
+                            window.getComputedStyle(lightbox).visibility === 'hidden') {
+                            
+                            fixLightboxVisibility(lightbox, lightboxImage, namespace);
+                        }
+                        
+                        // Fix image if needed
+                        if (state.currentImageIndex >= 0 && 
+                            state.lightboxItems && 
+                            state.lightboxItems.length > 0 &&
+                            state.currentImageIndex < state.lightboxItems.length) {
+                            
+                            const expectedUrl = state.lightboxItems[state.currentImageIndex].url;
+                            
+                            // If image source is empty or wrong
+                            if (!lightboxImage.src || !lightboxImage.src.includes(expectedUrl.split('?')[0])) {
+                                
+                                // Add timestamp to force reload
+                                const timestamp = new Date().getTime();
+                                const imageUrl = expectedUrl.includes('?') 
+                                    ? `${expectedUrl}&_t=${timestamp}` 
+                                    : `${expectedUrl}?_t=${timestamp}`;
+                                
+                                lightboxImage.src = imageUrl;
+                                
+                                // Apply necessary styles to image
+                                lightboxImage.style.cssText = `
+                                    max-width: 100% !important;
+                                    max-height: 100% !important;
+                                    object-fit: contain !important;
+                                    display: block !important;
+                                `;
+                            }
+                        }
+                    }
+                }, 50); // Short delay to let original handler run
             });
         });
     }
     
-    function ensureLightboxIsVisible() {
-        const lightbox = document.querySelector('.interactivity-gallery-lightbox');
+    // Function to add navigation handlers
+    function addNavigationHandlers(gallery, lightboxImage, namespace) {
+        const prevButton = gallery.querySelector('.interactivity-gallery-lightbox-prev');
+        const nextButton = gallery.querySelector('.interactivity-gallery-lightbox-next');
         
-        if (!lightbox) return;
+        if (prevButton) {
+            prevButton.addEventListener('click', function() {
+                // Let original handler run, then check
+                setTimeout(function() {
+                    fixImageAfterNavigation(lightboxImage, namespace);
+                }, 50);
+            });
+        }
         
-        // Force the lightbox to be visible
+        if (nextButton) {
+            nextButton.addEventListener('click', function() {
+                // Let original handler run, then check
+                setTimeout(function() {
+                    fixImageAfterNavigation(lightboxImage, namespace);
+                }, 50);
+            });
+        }
+    }
+    
+    // Function to fix image after navigation
+    function fixImageAfterNavigation(lightboxImage, namespace) {
+        if (!wp.interactivity || !wp.interactivity.state || !wp.interactivity.state[namespace]) {
+            return;
+        }
+        
+        const state = wp.interactivity.state[namespace];
+        
+        if (state.isLightboxOpen && 
+            state.currentImageIndex >= 0 && 
+            state.lightboxItems && 
+            state.lightboxItems.length > 0 &&
+            state.currentImageIndex < state.lightboxItems.length) {
+            
+            const expectedUrl = state.lightboxItems[state.currentImageIndex].url;
+            
+            // If image source is empty or wrong
+            if (!lightboxImage.src || !lightboxImage.src.includes(expectedUrl.split('?')[0])) {
+                
+                // Add timestamp to force reload
+                const timestamp = new Date().getTime();
+                const imageUrl = expectedUrl.includes('?') 
+                    ? `${expectedUrl}&_t=${timestamp}` 
+                    : `${expectedUrl}?_t=${timestamp}`;
+                
+                lightboxImage.src = imageUrl;
+            }
+        }
+    }
+    
+    // Function to fix lightbox visibility
+    function fixLightboxVisibility(lightbox, lightboxImage, namespace) {
+        // Make absolutely sure the lightbox is visible
+        lightbox.hidden = false;
+        lightbox.removeAttribute('hidden');
+        
         lightbox.style.cssText = `
             position: fixed !important;
             top: 0 !important;
@@ -84,8 +256,37 @@
             opacity: 1 !important;
         `;
         
-        // Remove hidden attributes
-        lightbox.hidden = false;
-        lightbox.removeAttribute('hidden');
+        // Also fix the image if we can
+        if (wp.interactivity && 
+            wp.interactivity.state && 
+            wp.interactivity.state[namespace] &&
+            wp.interactivity.state[namespace].isLightboxOpen) {
+            
+            const state = wp.interactivity.state[namespace];
+            
+            if (state.currentImageIndex >= 0 && 
+                state.lightboxItems && 
+                state.lightboxItems.length > 0 &&
+                state.currentImageIndex < state.lightboxItems.length) {
+                
+                const expectedUrl = state.lightboxItems[state.currentImageIndex].url;
+                
+                // Add timestamp to force reload
+                const timestamp = new Date().getTime();
+                const imageUrl = expectedUrl.includes('?') 
+                    ? `${expectedUrl}&_t=${timestamp}` 
+                    : `${expectedUrl}?_t=${timestamp}`;
+                
+                lightboxImage.src = imageUrl;
+                
+                // Apply necessary styles to image
+                lightboxImage.style.cssText = `
+                    max-width: 100% !important;
+                    max-height: 100% !important;
+                    object-fit: contain !important;
+                    display: block !important;
+                `;
+            }
+        }
     }
 })();
